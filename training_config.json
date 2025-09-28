@@ -1,0 +1,87 @@
+{
+  "model_type": "transformer",
+  "model_config": {
+    "vocab_size": 30522,
+    "hidden_size": 768,
+    "num_hidden_layers": 6,
+    "num_attention_heads": 12,
+    "intermediate_size": 3072,
+    "max_position_embeddings": 512,
+    "dropout": 0.1,
+    "num_labels": 2
+  },
+  "training_config": {
+    "learning_rate": 2e-5,
+    "num_epochs": 3,
+    "batch_size": 16,
+    "warmup_steps": 100,
+    "weight_decay": 0.01,
+    "validation_split": 0.2,
+    "checkpoint_dir": "checkpoints",
+    "save_path": "models",
+    "logging_steps": 50,
+    "save_steps": 200,
+    "eval_steps": 200
+  },
+  "data_config": {
+    "data_source": "database",
+    "data_type": "conversation",
+    "max_length": 512,
+    "text_column": "content",
+    "label_column": "role",
+    "label_mapping": {
+      "user": 0,
+      "assistant": 1
+    }
+  },
+  "langflow_config": {
+    "base_url": "http://localhost:7860",
+    "workflow_dir": "workflows",
+    "auto_start_server": true
+  },
+  "database_config": {
+    "connection_string": "postgresql://user:password@localhost/srm_guide_bot",
+    "table_mapping": {
+      "messages": "messages",
+      "users": "users",
+      "chats": "chats"
+    }
+  },
+  "model_variants": {
+    "small": {
+      "hidden_size": 384,
+      "num_hidden_layers": 4,
+      "num_attention_heads": 6,
+      "intermediate_size": 1536
+    },
+    "medium": {
+      "hidden_size": 768,
+      "num_hidden_layers": 6,
+      "num_attention_heads": 12,
+      "intermediate_size": 3072
+    },
+    "large": {
+      "hidden_size": 1024,
+      "num_hidden_layers": 12,
+      "num_attention_heads": 16,
+      "intermediate_size": 4096
+    }
+  },
+  "training_presets": {
+    "quick": {
+      "num_epochs": 1,
+      "batch_size": 32,
+      "learning_rate": 5e-5
+    },
+    "standard": {
+      "num_epochs": 3,
+      "batch_size": 16,
+      "learning_rate": 2e-5
+    },
+    "thorough": {
+      "num_epochs": 10,
+      "batch_size": 8,
+      "learning_rate": 1e-5
+    }
+  }
+}
