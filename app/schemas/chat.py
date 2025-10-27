@@ -3,7 +3,8 @@ Chat schemas for SRM Guide Bot
 """
 
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, Field
 
 from app.models.database import MessageRole
@@ -39,7 +40,12 @@ class MessageResponse(BaseModel):
     role: MessageRole = Field(..., description="Message role (user/assistant)")
     chat_id: str = Field(..., description="Chat ID")
     user_id: Optional[str] = Field(None, description="User ID (null for AI messages)")
-    metadata: Optional[Dict[str, Any]] = Field(None, description="Message metadata")
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Message metadata",
+        validation_alias="extra_metadata",
+        serialization_alias="metadata",
+    )
     created_at: datetime = Field(..., description="Message creation date")
 
     class Config:
