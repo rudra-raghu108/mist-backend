@@ -27,14 +27,18 @@ class AIDatabaseService:
     
     def __init__(self):
         self.session: Optional[AsyncSession] = None
-    
+        self._session_ctx = None
+
     async def __aenter__(self):
-        self.session = await get_async_session().__aenter__()
+        self._session_ctx = get_async_session()
+        self.session = await self._session_ctx.__aenter__()
         return self
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if self.session:
-            await self.session.__aexit__(exc_type, exc_val, exc_tb)
+        if self._session_ctx:
+            await self._session_ctx.__aexit__(exc_type, exc_val, exc_tb)
+        self.session = None
+        self._session_ctx = None
     
     # AI Model Management
     async def create_model(self, model_data: Dict[str, Any], user_id: str) -> AIModel:

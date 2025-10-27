@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     MONGO_DB_NAME: str = Field(default="srm_guide_bot", description="MongoDB database name")
     MONGO_USERNAME: str = Field(default="", description="MongoDB username")
     MONGO_PASSWORD: str = Field(default="", description="MongoDB password")
+    SQL_DATABASE_URL: str = Field(default="sqlite:///./mist.db", description="SQLAlchemy database URL")
+    SQL_DATABASE_URL_ASYNC: Optional[str] = Field(default=None, description="Optional async SQLAlchemy URL override")
+    SQL_ECHO: bool = Field(default=False, description="Enable SQLAlchemy engine echo logging")
     
     # Redis
     REDIS_URL: str = Field(default="redis://localhost:6379", description="Redis connection URL")
