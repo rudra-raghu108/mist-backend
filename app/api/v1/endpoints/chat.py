@@ -200,11 +200,11 @@ async def send_message(
             role=MessageRole.ASSISTANT,
             chat_id=chat_id,
             user_id=None,  # AI message
-            metadata={
+            extra_metadata={
                 "tokens_used": ai_response_data["tokens_used"],
                 "model_used": ai_response_data["model_used"],
-                "category": ai_response_data["category"]
-            }
+                "category": ai_response_data["category"],
+            },
         )
         db.add(ai_message)
         
@@ -222,7 +222,7 @@ async def send_message(
             role=ai_message.role,
             chat_id=ai_message.chat_id,
             user_id=ai_message.user_id,
-            metadata=ai_message.metadata,
+            metadata=ai_message.extra_metadata,
             created_at=ai_message.created_at
         )
         
@@ -269,7 +269,7 @@ async def get_chat_messages(
                 role=message.role,
                 chat_id=message.chat_id,
                 user_id=message.user_id,
-                metadata=message.metadata,
+                metadata=message.extra_metadata,
                 created_at=message.created_at
             ) for message in messages
         ]
