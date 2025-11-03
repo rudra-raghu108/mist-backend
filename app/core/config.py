@@ -3,7 +3,7 @@ Configuration settings for SRM Guide Bot
 """
 
 import os
-from typing import List, Optional, Union
+from typing import List, Optional
 from pydantic_settings import BaseSettings
 from pydantic import validator, Field
 
@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     PORT: int = Field(default=8000, description="Port to bind to")
     
     # Security
-    SECRET_KEY: str = Field(..., description="Secret key for JWT tokens")
+    SECRET_KEY: str = Field(default="change-me", description="Secret key for JWT tokens")
     ALGORITHM: str = Field(default="HS256", description="JWT algorithm")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, description="Access token expiration in minutes")
     REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7, description="Refresh token expiration in days")
@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     MONGO_DB_NAME: str = Field(default="srm_guide_bot", description="MongoDB database name")
     MONGO_USERNAME: str = Field(default="", description="MongoDB username")
     MONGO_PASSWORD: str = Field(default="", description="MongoDB password")
+    SQL_DATABASE_URL: str = Field(default="sqlite:///./mist.db", description="SQLAlchemy database URL")
+    SQL_DATABASE_URL_ASYNC: Optional[str] = Field(default=None, description="Optional async SQLAlchemy URL override")
+    SQL_ECHO: bool = Field(default=False, description="Enable SQLAlchemy engine echo logging")
     
     # Redis
     REDIS_URL: str = Field(default="redis://localhost:6379", description="Redis connection URL")
@@ -40,11 +43,11 @@ class Settings(BaseSettings):
     REDIS_DB: int = Field(default=0, description="Redis database number")
     
     # CORS
-    CORS_ORIGINS: str = Field(default="http://localhost:3000,http://localhost:5173", description="CORS origins")
-    ALLOWED_HOSTS: str = Field(default="*", description="Allowed hosts")
+    CORS_ORIGINS: List[str] = Field(default_factory=lambda: ["http://localhost:3000", "http://localhost:5173"], description="CORS origins")
+    ALLOWED_HOSTS: List[str] = Field(default_factory=lambda: ["*"], description="Allowed hosts")
     
     # OpenAI
-    OPENAI_API_KEY: str = Field(..., description="OpenAI API key")
+    OPENAI_API_KEY: str = Field(default="", description="OpenAI API key")
     OPENAI_MODEL: str = Field(default="gpt-4", description="OpenAI model to use")
     OPENAI_MAX_TOKENS: int = Field(default=2000, description="Maximum tokens for OpenAI")
     OPENAI_TEMPERATURE: float = Field(default=0.7, description="OpenAI temperature")
@@ -59,7 +62,15 @@ class Settings(BaseSettings):
     
     # File Upload
     MAX_FILE_SIZE: int = Field(default=5242880, description="Maximum file size in bytes")
-    ALLOWED_FILE_TYPES: str = Field(default="image/jpeg,image/png,image/gif,application/pdf", description="Allowed file types")
+    ALLOWED_FILE_TYPES: List[str] = Field(
+        default_factory=lambda: [
+            "image/jpeg",
+            "image/png",
+            "image/gif",
+            "application/pdf",
+        ],
+        description="Allowed file types",
+    )
     UPLOAD_DIR: str = Field(default="uploads", description="Upload directory")
     
     # Logging
@@ -111,19 +122,19 @@ class Settings(BaseSettings):
     @validator("CORS_ORIGINS", pre=True)
     def parse_cors_origins(cls, v):
         if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",")]
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v
-    
+
     @validator("ALLOWED_HOSTS", pre=True)
     def parse_allowed_hosts(cls, v):
         if isinstance(v, str):
-            return [host.strip() for host in v.split(",")]
+            return [host.strip() for host in v.split(",") if host.strip()]
         return v
-    
+
     @validator("ALLOWED_FILE_TYPES", pre=True)
     def parse_allowed_file_types(cls, v):
         if isinstance(v, str):
-            return [file_type.strip() for file_type in v.split(",")]
+            return [file_type.strip() for file_type in v.split(",") if file_type.strip()]
         return v
     
     class Config:
@@ -135,7 +146,7 @@ class Settings(BaseSettings):
         
         # Production validation
         if self.ENVIRONMENT == "production":
-            if not self.SECRET_KEY or self.SECRET_KEY == "your-super-secret-key-change-this-in-production":
+            if not self.SECRET_KEY or self.SECRET_KEY in {"change-me", "your-super-secret-key-change-this-in-production"}:
                 raise ValueError("SECRET_KEY must be set in production")
             if not self.OPENAI_API_KEY:
                 raise ValueError("OPENAI_API_KEY must be set in production")
