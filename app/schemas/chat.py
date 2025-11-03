@@ -58,6 +58,10 @@ class AIResponse(BaseModel):
     tokens_used: Dict[str, int] = Field(..., description="Token usage statistics")
     model_used: str = Field(..., description="AI model used")
     category: str = Field(..., description="Message category")
+    knowledge_base: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Knowledge base match metadata when the response is grounded in FAQs",
+    )
 
 
 class QuickSuggestion(BaseModel):
