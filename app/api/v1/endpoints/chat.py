@@ -211,7 +211,7 @@ async def send_message(
             role=MessageRole.ASSISTANT,
             chat_id=chat_id,
             user_id=None,  # AI message
-            extra_metadata=ai_metadata,
+ main
         )
         db.add(ai_message)
         
