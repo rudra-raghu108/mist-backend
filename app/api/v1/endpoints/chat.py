@@ -186,6 +186,9 @@ async def send_message(
         chat_history = db.query(Message).filter(
             Message.chat_id == chat_id
         ).order_by(Message.created_at.desc()).limit(10).all()
+
+        # Ensure chronological order before passing to the AI service
+        chat_history = list(reversed(chat_history))
         
         # Generate AI response
         ai_response_data = await ai_service.generate_response(
