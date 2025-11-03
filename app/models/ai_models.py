@@ -1,19 +1,28 @@
-"""
-AI Models and Training Data Models for SRM Guide Bot
-"""
+"""AI Models and Training Data Models for SRM Guide Bot."""
 
-from datetime import datetime
-from typing import Optional, List, Dict, Any
-from sqlalchemy import (
-    Column, Integer, String, Boolean, DateTime, Text, 
-    Float, JSON, ForeignKey, Enum, Index, UniqueConstraint
-)
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship, Mapped, mapped_column
-import uuid
+from __future__ import annotations
+
 import enum
+import uuid
+from datetime import datetime
+from typing import List, Optional
 
-Base = declarative_base()
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.core.database import Base
 
 
 class ModelType(str, enum.Enum):

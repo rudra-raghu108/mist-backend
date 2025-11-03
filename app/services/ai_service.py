@@ -1,22 +1,20 @@
-"""
-AI Service for SRM Guide Bot
-Handles OpenAI integration and intelligent responses
+"""AI Service for SRM Guide Bot.
+
+Handles OpenAI integration while grounding responses in the FAQ knowledge base.
 """
 
 import asyncio
 import logging
-from typing import Dict, List, Optional, Any
-from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+import openai
 import tiktoken
-from openai import AsyncOpenAI
-from langchain_openai import ChatOpenAI
-from langchain.schema import HumanMessage, SystemMessage
-from langchain.prompts import ChatPromptTemplate
-from langchain.chains import LLMChain
+from openai.error import OpenAIError
 
 from app.core.config import settings
-from app.models.database import User, Message, MessageRole
+from app.models.database import Message, MessageRole, User
 from app.services.analytics_service import AnalyticsService
+from app.services.faq_service import FaqMatch, faq_service
 
 logger = logging.getLogger(__name__)
 
@@ -25,15 +23,19 @@ class AIService:
     """AI Service for handling OpenAI interactions"""
     
     def __init__(self):
-        self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-        self.llm = ChatOpenAI(
-            model=settings.OPENAI_MODEL,
-            temperature=settings.OPENAI_TEMPERATURE,
-            max_tokens=settings.OPENAI_MAX_TOKENS,
-            openai_api_key=settings.OPENAI_API_KEY
-        )
+        if settings.OPENAI_API_KEY:
+            openai.api_key = settings.OPENAI_API_KEY
+            self._openai_enabled = True
+        else:
+            self._openai_enabled = False
+            logger.warning(
+                "OpenAI API key is not configured. Falling back to knowledge base responses."
+            )
         self.analytics_service = AnalyticsService()
-        self.encoding = tiktoken.encoding_for_model(settings.OPENAI_MODEL)
+        try:
+            self.encoding = tiktoken.encoding_for_model(settings.OPENAI_MODEL)
+        except KeyError:
+            self.encoding = tiktoken.get_encoding("cl100k_base")
         
         # SRM-specific system prompts
         self.system_prompts = {
@@ -245,58 +247,115 @@ Booking Process:
 Emphasize safety, comfort, and convenience."""
     
     async def generate_response(
-        self, 
-        user_message: str, 
+        self,
+        user_message: str,
         user: Optional[User] = None,
         chat_history: Optional[List[Message]] = None,
         context: Optional[str] = None
     ) -> Dict[str, Any]:
         """Generate AI response for user message"""
         try:
-            # Determine context and select appropriate system prompt
+            faq_match = await faq_service.find_best_match(user_message)
+
+            if not self._is_srm_related(user_message, faq_match):
+                return await self._build_out_of_scope_response(user_message, user)
+
             system_prompt = self._select_system_prompt(user_message, context)
-            
-            # Prepare conversation history
+
+            if faq_match:
+                system_prompt = self._inject_faq_context(system_prompt, faq_match.entry)
+
+            if not self._openai_enabled:
+                return await self._build_knowledge_base_response(user_message, faq_match, user)
+
             messages = self._prepare_messages(user_message, chat_history, system_prompt)
-            
-            # Generate response using OpenAI
-            response = await self.client.chat.completions.create(
-                model=settings.OPENAI_MODEL,
-                messages=messages,
-                temperature=settings.OPENAI_TEMPERATURE,
-                max_tokens=settings.OPENAI_MAX_TOKENS,
-                user=str(user.id) if user else "anonymous"
-            )
-            
-            ai_response = response.choices[0].message.content
-            
-            # Calculate token usage
+
+            try:
+                response = await self._create_chat_completion(messages, user)
+                ai_response = response["choices"][0]["message"]["content"]
+            except OpenAIError as exc:
+                logger.error("OpenAI error: %s", exc)
+                return await self._build_knowledge_base_response(
+                    user_message, faq_match, user, fallback_error=str(exc)
+                )
+
+            if faq_match:
+                ai_response = self._append_source_to_response(ai_response, faq_match.entry)
+
             token_usage = self._calculate_tokens(user_message, ai_response)
-            
-            # Track analytics
+            category = self._categorize_message(user_message)
+
             if user:
                 await self.analytics_service.track_message_interaction(
                     user_id=user.id,
                     message_type="ai_response",
                     tokens_used=token_usage["total_tokens"],
-                    category=self._categorize_message(user_message)
+                    category=category
                 )
-            
+
             return {
                 "content": ai_response,
                 "tokens_used": token_usage,
-                "model_used": settings.OPENAI_MODEL,
-                "category": self._categorize_message(user_message)
+                "model_used": f"{settings.OPENAI_MODEL}+knowledge-base" if faq_match else settings.OPENAI_MODEL,
+                "category": category,
+                "knowledge_base": self._serialize_faq_match(faq_match)
             }
-            
+
         except Exception as e:
-            logger.error(f"Error generating AI response: {str(e)}")
+            logger.error("Error generating AI response: %s", e)
             return {
                 "content": "I apologize, but I'm experiencing technical difficulties. Please try again in a moment.",
                 "tokens_used": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
                 "model_used": settings.OPENAI_MODEL,
                 "category": "error"
             }
+
+    def _is_srm_related(self, message: str, faq_match: Optional[FaqMatch]) -> bool:
+        """Determine if the incoming query is related to SRM or college topics."""
+
+        if faq_match:
+            return True
+
+        text = message.lower()
+
+        institution_markers = [
+            "srm",
+            "mist ai",
+            "kattankulathur",
+            "vadapalani",
+            "ramapuram",
+            "delhi ncr",
+            "amaravati",
+            "university",
+            "college",
+            "campus",
+        ]
+
+        if any(marker in text for marker in institution_markers):
+            return True
+
+        topic_markers = [
+            "admission",
+            "entrance",
+            "srmjeee",
+            "program",
+            "course",
+            "curriculum",
+            "department",
+            "placement",
+            "internship",
+            "hostel",
+            "mess",
+            "fees",
+            "scholarship",
+            "faculty",
+            "library",
+            "laboratory",
+            "exam",
+        ]
+
+        topic_hits = sum(1 for marker in topic_markers if marker in text)
+        return topic_hits > 0
     
     def _select_system_prompt(self, message: str, context: Optional[str] = None) -> str:
         """Select appropriate system prompt based on message content"""
@@ -353,7 +412,7 @@ Emphasize safety, comfort, and convenience."""
             prompt_tokens = len(self.encoding.encode(prompt))
             completion_tokens = len(self.encoding.encode(completion))
             total_tokens = prompt_tokens + completion_tokens
-            
+
             return {
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
@@ -362,6 +421,149 @@ Emphasize safety, comfort, and convenience."""
         except Exception as e:
             logger.error(f"Error calculating tokens: {str(e)}")
             return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+    async def _build_knowledge_base_response(
+        self,
+        user_message: str,
+        faq_match: Optional[FaqMatch],
+        user: Optional[User],
+        fallback_error: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Return a response using only the structured FAQ knowledge base."""
+
+        if faq_match:
+            content = self._format_faq_answer(faq_match.entry)
+            category = faq_match.entry.category.value
+        else:
+            content = (
+                "I'm still expanding my knowledge base and couldn't find a verified answer yet. "
+                "Please try rephrasing your question or contact the SRM helpdesk."
+            )
+            if fallback_error:
+                content += "\n\nTechnical detail: " + fallback_error
+            category = self._categorize_message(user_message)
+
+        token_usage = self._calculate_tokens(user_message, content)
+
+        if user:
+            await self.analytics_service.track_message_interaction(
+                user_id=user.id,
+                message_type="ai_response",
+                tokens_used=token_usage["total_tokens"],
+                category=category
+            )
+
+        return {
+            "content": content,
+            "tokens_used": token_usage,
+            "model_used": "knowledge-base",
+            "category": category,
+            "knowledge_base": self._serialize_faq_match(faq_match)
+        }
+
+    async def _build_out_of_scope_response(
+        self,
+        user_message: str,
+        user: Optional[User],
+    ) -> Dict[str, Any]:
+        """Return a friendly response for queries unrelated to SRM."""
+
+        content = (
+            "This question doesn't appear to be related to SRM Institute of Science & Technology. "
+            "Please ask something about the college, its programs, campus life, or services so I can help!"
+        )
+        category = "out_of_scope"
+        token_usage = self._calculate_tokens(user_message, content)
+
+        if user:
+            await self.analytics_service.track_message_interaction(
+                user_id=user.id,
+                message_type="ai_response",
+                tokens_used=token_usage["total_tokens"],
+                category=category,
+            )
+
+        return {
+            "content": content,
+            "tokens_used": token_usage,
+            "model_used": "college-scope-guard",
+            "category": category,
+            "knowledge_base": None,
+        }
+
+    async def _create_chat_completion(
+        self,
+        messages: List[Dict[str, str]],
+        user: Optional[User],
+    ) -> Dict[str, Any]:
+        """Execute the OpenAI ChatCompletion request in a worker thread."""
+
+        if not self._openai_enabled:
+            raise RuntimeError("OpenAI access is not configured")
+
+        def _request() -> Dict[str, Any]:
+            return openai.ChatCompletion.create(
+                model=settings.OPENAI_MODEL,
+                messages=messages,
+                temperature=settings.OPENAI_TEMPERATURE,
+                max_tokens=settings.OPENAI_MAX_TOKENS,
+                user=str(user.id) if user else "anonymous",
+            )
+
+        return await asyncio.to_thread(_request)
+
+    def _inject_faq_context(self, base_prompt: str, entry: Any) -> str:
+        """Embed FAQ data into the system prompt."""
+
+        snippet = [
+            "You have access to the following verified SRM knowledge base entry.",
+            "Use it to craft a concise, friendly answer and cite the source when relevant.",
+            f"Question: {entry.question}",
+            f"Answer: {entry.answer}",
+        ]
+
+        if entry.source_name or entry.source_url:
+            parts = [part for part in [entry.source_name, entry.source_url] if part]
+            snippet.append("Source: " + " — ".join(parts))
+
+        return base_prompt + "\n\n" + "\n".join(snippet)
+
+    def _format_faq_answer(self, entry: Any) -> str:
+        """Convert a FAQ entry into a conversational response."""
+
+        lines = [entry.answer.strip()]
+
+        source_parts = [part for part in [entry.source_name, entry.source_url] if part]
+        if source_parts:
+            lines.append("")
+            lines.append("Source: " + " — ".join(source_parts))
+
+        return "\n".join(lines)
+
+    def _append_source_to_response(self, response: str, entry: Any) -> str:
+        """Add source attribution to an OpenAI-generated response if missing."""
+
+        if entry.source_name or entry.source_url:
+            if "Source:" not in response:
+                parts = [part for part in [entry.source_name, entry.source_url] if part]
+                response = response.rstrip() + "\n\nSource: " + " — ".join(parts)
+        return response
+
+    def _serialize_faq_match(self, match: Optional[FaqMatch]) -> Optional[Dict[str, Any]]:
+        """Serialize FAQ metadata for API responses."""
+
+        if not match:
+            return None
+
+        entry = match.entry
+        return {
+            "question": entry.question,
+            "category": entry.category.value if entry.category else None,
+            "score": round(match.score, 2),
+            "source_name": entry.source_name,
+            "source_url": entry.source_url,
+            "tags": entry.tags,
+        }
     
     def _categorize_message(self, message: str) -> str:
         """Categorize user message"""

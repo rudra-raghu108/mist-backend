@@ -186,6 +186,9 @@ async def send_message(
         chat_history = db.query(Message).filter(
             Message.chat_id == chat_id
         ).order_by(Message.created_at.desc()).limit(10).all()
+
+        # Ensure chronological order before passing to the AI service
+        chat_history = list(reversed(chat_history))
         
         # Generate AI response
         ai_response_data = await ai_service.generate_response(
@@ -193,18 +196,22 @@ async def send_message(
             user=current_user,
             chat_history=chat_history
         )
-        
+
         # Save AI response
+        ai_metadata = {
+            "tokens_used": ai_response_data["tokens_used"],
+            "model_used": ai_response_data["model_used"],
+            "category": ai_response_data["category"],
+        }
+        if ai_response_data.get("knowledge_base"):
+            ai_metadata["knowledge_base"] = ai_response_data["knowledge_base"]
+
         ai_message = Message(
             content=ai_response_data["content"],
             role=MessageRole.ASSISTANT,
             chat_id=chat_id,
             user_id=None,  # AI message
-            metadata={
-                "tokens_used": ai_response_data["tokens_used"],
-                "model_used": ai_response_data["model_used"],
-                "category": ai_response_data["category"]
-            }
+            extra_metadata=ai_metadata,
         )
         db.add(ai_message)
         
@@ -222,7 +229,7 @@ async def send_message(
             role=ai_message.role,
             chat_id=ai_message.chat_id,
             user_id=ai_message.user_id,
-            metadata=ai_message.metadata,
+            metadata=ai_message.extra_metadata,
             created_at=ai_message.created_at
         )
         
@@ -269,7 +276,7 @@ async def get_chat_messages(
                 role=message.role,
                 chat_id=message.chat_id,
                 user_id=message.user_id,
-                metadata=message.metadata,
+                metadata=message.extra_metadata,
                 created_at=message.created_at
             ) for message in messages
         ]
