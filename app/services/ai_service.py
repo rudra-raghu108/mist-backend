@@ -256,6 +256,10 @@ Emphasize safety, comfort, and convenience."""
         """Generate AI response for user message"""
         try:
             faq_match = await faq_service.find_best_match(user_message)
+
+            if not self._is_srm_related(user_message, faq_match):
+                return await self._build_out_of_scope_response(user_message, user)
+
             system_prompt = self._select_system_prompt(user_message, context)
 
             if faq_match:
@@ -311,6 +315,53 @@ Emphasize safety, comfort, and convenience."""
                 "model_used": settings.OPENAI_MODEL,
                 "category": "error"
             }
+
+    def _is_srm_related(self, message: str, faq_match: Optional[FaqMatch]) -> bool:
+        """Determine if the incoming query is related to SRM or college topics."""
+
+        if faq_match:
+            return True
+
+        text = message.lower()
+
+        institution_markers = [
+            "srm",
+            "mist ai",
+            "kattankulathur",
+            "vadapalani",
+            "ramapuram",
+            "delhi ncr",
+            "amaravati",
+            "university",
+            "college",
+            "campus",
+        ]
+
+        if any(marker in text for marker in institution_markers):
+            return True
+
+        topic_markers = [
+            "admission",
+            "entrance",
+            "srmjeee",
+            "program",
+            "course",
+            "curriculum",
+            "department",
+            "placement",
+            "internship",
+            "hostel",
+            "mess",
+            "fees",
+            "scholarship",
+            "faculty",
+            "library",
+            "laboratory",
+            "exam",
+        ]
+
+        topic_hits = sum(1 for marker in topic_markers if marker in text)
+        return topic_hits > 0
     
     def _select_system_prompt(self, message: str, context: Optional[str] = None) -> str:
         """Select appropriate system prompt based on message content"""
@@ -414,6 +465,36 @@ Emphasize safety, comfort, and convenience."""
             "model_used": "knowledge-base",
             "category": category,
             "knowledge_base": self._serialize_faq_match(faq_match)
+        }
+
+    async def _build_out_of_scope_response(
+        self,
+        user_message: str,
+        user: Optional[User],
+    ) -> Dict[str, Any]:
+        """Return a friendly response for queries unrelated to SRM."""
+
+        content = (
+            "This question doesn't appear to be related to SRM Institute of Science & Technology. "
+            "Please ask something about the college, its programs, campus life, or services so I can help!"
+        )
+        category = "out_of_scope"
+        token_usage = self._calculate_tokens(user_message, content)
+
+        if user:
+            await self.analytics_service.track_message_interaction(
+                user_id=user.id,
+                message_type="ai_response",
+                tokens_used=token_usage["total_tokens"],
+                category=category,
+            )
+
+        return {
+            "content": content,
+            "tokens_used": token_usage,
+            "model_used": "college-scope-guard",
+            "category": category,
+            "knowledge_base": None,
         }
 
     def _inject_faq_context(self, base_prompt: str, entry: Any) -> str:
