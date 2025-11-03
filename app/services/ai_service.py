@@ -5,10 +5,11 @@ Handles OpenAI integration while grounding responses in the FAQ knowledge base.
 
 import asyncio
 import logging
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-import openai
 import tiktoken
+from openai import AsyncOpenAI
 from openai.error import OpenAIError
 
 from app.core.config import settings
@@ -24,10 +25,9 @@ class AIService:
     
     def __init__(self):
         if settings.OPENAI_API_KEY:
-            openai.api_key = settings.OPENAI_API_KEY
-            self._openai_enabled = True
+            self.client: Optional[AsyncOpenAI] = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         else:
-            self._openai_enabled = False
+            self.client = None
             logger.warning(
                 "OpenAI API key is not configured. Falling back to knowledge base responses."
             )
@@ -265,14 +265,20 @@ Emphasize safety, comfort, and convenience."""
             if faq_match:
                 system_prompt = self._inject_faq_context(system_prompt, faq_match.entry)
 
-            if not self._openai_enabled:
+            if not self.client:
                 return await self._build_knowledge_base_response(user_message, faq_match, user)
 
             messages = self._prepare_messages(user_message, chat_history, system_prompt)
 
             try:
-                response = await self._create_chat_completion(messages, user)
-                ai_response = response["choices"][0]["message"]["content"]
+                response = await self.client.chat.completions.create(
+                    model=settings.OPENAI_MODEL,
+                    messages=messages,
+                    temperature=settings.OPENAI_TEMPERATURE,
+                    max_tokens=settings.OPENAI_MAX_TOKENS,
+                    user=str(user.id) if user else "anonymous"
+                )
+                ai_response = response.choices[0].message.content
             except OpenAIError as exc:
                 logger.error("OpenAI error: %s", exc)
                 return await self._build_knowledge_base_response(
@@ -490,27 +496,6 @@ Emphasize safety, comfort, and convenience."""
             "category": category,
             "knowledge_base": None,
         }
-
-    async def _create_chat_completion(
-        self,
-        messages: List[Dict[str, str]],
-        user: Optional[User],
-    ) -> Dict[str, Any]:
-        """Execute the OpenAI ChatCompletion request in a worker thread."""
-
-        if not self._openai_enabled:
-            raise RuntimeError("OpenAI access is not configured")
-
-        def _request() -> Dict[str, Any]:
-            return openai.ChatCompletion.create(
-                model=settings.OPENAI_MODEL,
-                messages=messages,
-                temperature=settings.OPENAI_TEMPERATURE,
-                max_tokens=settings.OPENAI_MAX_TOKENS,
-                user=str(user.id) if user else "anonymous",
-            )
-
-        return await asyncio.to_thread(_request)
 
     def _inject_faq_context(self, base_prompt: str, entry: Any) -> str:
         """Embed FAQ data into the system prompt."""
